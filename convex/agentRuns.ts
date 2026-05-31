@@ -1,12 +1,14 @@
 import { internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUserId } from "./lib/auth";
 
 export const latest = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, { limit }) => {
+    const uid = await requireUserId(ctx);
     const rows = await ctx.db
       .query("agentRuns")
-      .withIndex("by_runAt")
+      .withIndex("by_owner_runAt", (q) => q.eq("ownerId", uid))
       .order("desc")
       .take(limit ?? 50);
     return rows;
@@ -15,6 +17,7 @@ export const latest = query({
 
 export const insert = internalMutation({
   args: {
+    ownerId: v.id("users"),
     agent: v.union(
       v.literal("Catering"),
       v.literal("Waste Control"),

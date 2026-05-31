@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.80",
+    "@auth/core": "^0.37.0",
+    "@convex-dev/auth": "^0.0.92",
     "ai": "^6.0.193",
     "convex": "^1.39.1",
     "lucide-react": "^0.453.0",

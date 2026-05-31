@@ -1,10 +1,15 @@
 import { internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUserId } from "./lib/auth";
 
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const rows = await ctx.db.query("engageThreads").collect();
+    const uid = await requireUserId(ctx);
+    const rows = await ctx.db
+      .query("engageThreads")
+      .withIndex("by_owner_likelihood", (q) => q.eq("ownerId", uid))
+      .collect();
     rows.sort((a, b) => b.updatedAt - a.updatedAt);
     return rows;
   },
@@ -13,15 +18,17 @@ export const list = query({
 export const byAccount = query({
   args: { accountId: v.id("accounts") },
   handler: async (ctx, { accountId }) => {
+    const uid = await requireUserId(ctx);
     return await ctx.db
       .query("engageThreads")
-      .withIndex("by_account", (q) => q.eq("accountId", accountId))
+      .withIndex("by_owner_account", (q) => q.eq("ownerId", uid).eq("accountId", accountId))
       .collect();
   },
 });
 
 export const insertReply = internalMutation({
   args: {
+    ownerId: v.id("users"),
     accountId: v.id("accounts"),
     name: v.string(),
     last: v.string(),

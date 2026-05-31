@@ -1,7 +1,7 @@
 "use node";
 /**
  * Resend wrapper. Reads RESEND_API_KEY + RESEND_FROM from Convex env.
- * Owner email comes from KUTLERRI_OWNER_EMAIL.
+ * Recipient is resolved per-tenant from the `users` table — no env var.
  */
 import { action, internalAction } from "./_generated/server";
 import { v } from "convex/values";
@@ -18,19 +18,13 @@ function from(): string {
   return process.env.RESEND_FROM ?? "onboarding@resend.dev";
 }
 
-function ownerEmail(): string {
-  const e = process.env.KUTLERRI_OWNER_EMAIL;
-  if (!e) throw new Error("KUTLERRI_OWNER_EMAIL is not set in Convex env");
-  return e;
-}
-
 /** Internal sender used by the overnight orchestrator action. */
 export const _sendToOwnerInternal = internalAction({
-  args: { subject: v.string(), text: v.string(), html: v.string() },
-  handler: async (_ctx, { subject, text, html }) => {
+  args: { to: v.string(), subject: v.string(), text: v.string(), html: v.string() },
+  handler: async (_ctx, { to, subject, text, html }) => {
     const r = await resendClient().emails.send({
       from: from(),
-      to: ownerEmail(),
+      to,
       subject,
       text,
       html,
@@ -42,11 +36,11 @@ export const _sendToOwnerInternal = internalAction({
 
 /** Public version for ad-hoc CLI sends. */
 export const sendToOwner = action({
-  args: { subject: v.string(), text: v.string(), html: v.string() },
-  handler: async (_ctx, { subject, text, html }) => {
+  args: { to: v.string(), subject: v.string(), text: v.string(), html: v.string() },
+  handler: async (_ctx, { to, subject, text, html }) => {
     const r = await resendClient().emails.send({
       from: from(),
-      to: ownerEmail(),
+      to,
       subject,
       text,
       html,
@@ -58,15 +52,19 @@ export const sendToOwner = action({
 
 /** Scheduled by cards.approve when a HOT_REPLY card is approved. */
 export const sendReplyFromCard = internalAction({
-  args: { cardId: v.id("cards") },
-  handler: async (ctx, { cardId }) => {
+  args: { ownerId: v.id("users"), cardId: v.id("cards") },
+  handler: async (ctx, { ownerId, cardId }) => {
     const ctx2: any = ctx;
-    const card: any = await ctx2.runQuery(internal.cards._getRaw, { cardId });
+    const card: any = await ctx2.runQuery(internal.cards._getRaw, { ownerId, cardId });
     if (!card || !card.aiReplyDraft || !card.contactId) return;
     const contact: any = await ctx2.runQuery(internal.contacts._getRaw, {
+      ownerId,
       contactId: card.contactId,
     });
     if (!contact?.email) return;
+    const owner: any = await ctx2.runQuery(internal.users._getRaw, { ownerId });
+    const replyTo = owner?.email;
+    if (!replyTo) return;
 
     const draft: string = card.aiReplyDraft;
     const lines = draft.split("\n");
@@ -85,10 +83,11 @@ export const sendReplyFromCard = internalAction({
       subject,
       text: body,
       html: `<pre style="font-family:sans-serif;white-space:pre-wrap;">${escape(body)}</pre>`,
-      replyTo: ownerEmail(),
+      replyTo,
     });
 
     await ctx2.runMutation(internal.agentRuns.insert, {
+      ownerId,
       agent: "Catering",
       lane: "needs-you",
       summary: r.error
@@ -124,7 +123,7 @@ export const sendReply = action({
       subject,
       text,
       html: html ?? `<pre style="font-family:sans-serif;white-space:pre-wrap;">${text}</pre>`,
-      replyTo: replyTo ?? ownerEmail(),
+      replyTo,
     });
     if (r.error) throw new Error(`Resend error: ${r.error.message}`);
     return { id: r.data?.id ?? null };

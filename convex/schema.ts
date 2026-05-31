@@ -1,39 +1,58 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
 /**
- * Kutlerri V1 schema — single tenant (Round Rock Kitchen).
+ * Kutlerri V2 schema — multi-tenant via Convex Auth.
  *
  * Lifecycle: signals.ingest → scoring → cards (Today queue) →
  * owner approves/skips → agentRuns (audit log) → optionally emit
- * Resend send / Convex action.
+ * Resend send / Convex action. Every domain row is scoped to a
+ * `users._id` via `ownerId`. Every index is owner-prefixed.
  */
 export default defineSchema({
+  ...authTables,
+  // Extra optional fields on the auth `users` table (Convex Auth lets you
+  // augment by re-declaring with the same name after the spread).
+  users: defineTable({
+    name: v.optional(v.string()),
+    image: v.optional(v.string()),
+    email: v.optional(v.string()),
+    emailVerificationTime: v.optional(v.number()),
+    phone: v.optional(v.string()),
+    phoneVerificationTime: v.optional(v.number()),
+    isAnonymous: v.optional(v.boolean()),
+    // Kutlerri-specific:
+    restaurantName: v.optional(v.string()),
+    ownerName: v.optional(v.string()),
+  })
+    .index("email", ["email"])
+    .index("phone", ["phone"]),
+
   // ── Businesses we sell catering to ──────────────────────────────────────
   accounts: defineTable({
+    ownerId: v.id("users"),
     name: v.string(),
     domain: v.optional(v.string()),
     industry: v.optional(v.string()),
     headcount: v.optional(v.number()),
     city: v.string(),
     distanceMiles: v.number(),
-    // last update of any signal touching this account
     lastSignalAt: v.optional(v.number()),
-    // cached score derived from signals (0–100)
     intentScore: v.number(),
     intentLevel: v.union(v.literal("hot"), v.literal("warm"), v.literal("cold")),
   })
-    .index("by_score", ["intentScore"])
-    .index("by_name", ["name"]),
+    .index("by_owner_score", ["ownerId", "intentScore"])
+    .index("by_owner_name", ["ownerId", "name"]),
 
   // ── People at those businesses ──────────────────────────────────────────
   contacts: defineTable({
+    ownerId: v.id("users"),
     accountId: v.id("accounts"),
     name: v.string(),
     initials: v.string(),
     title: v.string(),
     email: v.optional(v.string()),
-    // 0–100 engagement score
     score: v.number(),
     status: v.union(
       v.literal("replied"),
@@ -42,14 +61,15 @@ export default defineSchema({
       v.literal("lapsed"),
       v.literal("cold"),
     ),
-    activity: v.string(), // human-readable last activity blurb
+    activity: v.string(),
     lastActivityAt: v.optional(v.number()),
   })
-    .index("by_account", ["accountId"])
-    .index("by_score", ["score"]),
+    .index("by_owner_account", ["ownerId", "accountId"])
+    .index("by_owner_score", ["ownerId", "score"]),
 
   // ── Raw intent signals (the connector layer) ───────────────────────────
   signals: defineTable({
+    ownerId: v.id("users"),
     accountId: v.id("accounts"),
     source: v.union(
       v.literal("toast_pos_guest_match"),
@@ -60,16 +80,17 @@ export default defineSchema({
       v.literal("greenhouse_lever_ats"),
       v.literal("retention_cross_agent"),
     ),
-    weight: v.number(), // 0–1 source weight (Toast match = 1.0, etc.)
-    label: v.string(), // "5 office-manager job posts in last 14 days"
-    rawPayload: v.string(), // JSON.stringify of the source payload shape
+    weight: v.number(),
+    label: v.string(),
+    rawPayload: v.string(),
     observedAt: v.number(),
   })
-    .index("by_account", ["accountId"])
-    .index("by_observedAt", ["observedAt"]),
+    .index("by_owner_account", ["ownerId", "accountId"])
+    .index("by_owner_observedAt", ["ownerId", "observedAt"]),
 
   // ── Today queue cards ──────────────────────────────────────────────────
   cards: defineTable({
+    ownerId: v.id("users"),
     type: v.union(
       v.literal("HOT_REPLY"),
       v.literal("NEW_SEGMENT"),
@@ -77,7 +98,7 @@ export default defineSchema({
     ),
     agent: v.literal("Catering"),
     lane: v.union(v.literal("needs-you"), v.literal("autonomous")),
-    poweredBy: v.optional(v.string()), // cross-agent attribution
+    poweredBy: v.optional(v.string()),
     status: v.union(
       v.literal("open"),
       v.literal("approved"),
@@ -96,38 +117,39 @@ export default defineSchema({
     impactUSD: v.number(),
     impactKind: v.string(),
 
-    // AI-generated content (validated against zod before storage)
     aiRecommendation: v.string(),
-    aiReplyDraft: v.optional(v.string()),       // HOT_REPLY
-    aiSegmentBrief: v.optional(v.any()),         // NEW_SEGMENT — { criteria, sampleNames, expectedReply, sequence }
-    aiJudgmentOptions: v.optional(v.any()),      // NEEDS_JUDGMENT — array of { letter, title, predicted }
+    aiReplyDraft: v.optional(v.string()),
+    aiSegmentBrief: v.optional(v.any()),
+    aiJudgmentOptions: v.optional(v.any()),
 
     signalIds: v.array(v.id("signals")),
     createdAt: v.number(),
     resolvedAt: v.optional(v.number()),
   })
-    .index("by_status", ["status"])
-    .index("by_lane_status", ["lane", "status"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_owner_status", ["ownerId", "status"])
+    .index("by_owner_lane_status", ["ownerId", "lane", "status"])
+    .index("by_owner_createdAt", ["ownerId", "createdAt"]),
 
   // ── Engage tab threads ──────────────────────────────────────────────────
   engageThreads: defineTable({
+    ownerId: v.id("users"),
     accountId: v.id("accounts"),
     channel: v.union(v.literal("email"), v.literal("dm"), v.literal("call")),
     name: v.string(),
     last: v.string(),
     when: v.string(),
     unread: v.boolean(),
-    replyLikelihood: v.number(), // 0–100
+    replyLikelihood: v.number(),
     predictedReply: v.string(),
     sentBy: v.union(v.literal("agent"), v.literal("owner")),
     updatedAt: v.number(),
   })
-    .index("by_account", ["accountId"])
-    .index("by_likelihood", ["replyLikelihood"]),
+    .index("by_owner_account", ["ownerId", "accountId"])
+    .index("by_owner_likelihood", ["ownerId", "replyLikelihood"]),
 
   // ── Overnight / audit log ──────────────────────────────────────────────
   agentRuns: defineTable({
+    ownerId: v.id("users"),
     agent: v.union(
       v.literal("Catering"),
       v.literal("Waste Control"),
@@ -142,7 +164,7 @@ export default defineSchema({
     cardId: v.optional(v.id("cards")),
     href: v.optional(v.string()),
     runAt: v.number(),
-    window: v.string(), // e.g. "9 PM – 8 AM"
+    window: v.string(),
   })
-    .index("by_runAt", ["runAt"]),
+    .index("by_owner_runAt", ["ownerId", "runAt"]),
 });

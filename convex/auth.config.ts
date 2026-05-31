@@ -1,7 +1,12 @@
 /**
- * V1 is single-tenant (Round Rock Kitchen). No external auth provider.
- * Exporting an empty providers array keeps Convex auth happy while we ship.
+ * Convex Auth provider config — required so Convex trusts its own JWTs.
+ * SITE_URL is set automatically by `npx @convex-dev/auth` per deployment.
  */
 export default {
-  providers: [],
+  providers: [
+    {
+      domain: process.env.CONVEX_SITE_URL,
+      applicationID: "convex",
+    },
+  ],
 };

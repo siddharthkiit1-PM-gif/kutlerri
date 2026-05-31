@@ -10,14 +10,17 @@
 
 import type * as accounts from "../accounts.js";
 import type * as agentRuns from "../agentRuns.js";
+import type * as auth from "../auth.js";
 import type * as cards from "../cards.js";
 import type * as contacts from "../contacts.js";
 import type * as crons from "../crons.js";
 import type * as email from "../email.js";
 import type * as engageThreads from "../engageThreads.js";
+import type * as http from "../http.js";
+import type * as lib_auth from "../lib/auth.js";
 import type * as overnight from "../overnight.js";
-import type * as seed from "../seed.js";
 import type * as signals from "../signals.js";
+import type * as users from "../users.js";
 
 import type {
   ApiFromModules,
@@ -28,14 +31,17 @@ import type {
 declare const fullApi: ApiFromModules<{
   accounts: typeof accounts;
   agentRuns: typeof agentRuns;
+  auth: typeof auth;
   cards: typeof cards;
   contacts: typeof contacts;
   crons: typeof crons;
   email: typeof email;
   engageThreads: typeof engageThreads;
+  http: typeof http;
+  "lib/auth": typeof lib_auth;
   overnight: typeof overnight;
-  seed: typeof seed;
   signals: typeof signals;
+  users: typeof users;
 }>;
 
 /**
